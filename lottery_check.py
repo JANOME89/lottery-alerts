@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Проверка лотереи PancakeSwap: читает контракт BSC и шлёт алерт в Telegram.
+"""Монитор лотереи PancakeSwap.
 
-Запускается на GitHub Actions. Зависимостей нет — только стандартная библиотека.
-Переменные окружения: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, PROXY (необязательно).
+Правило уведомлений:
+  • вне последнего часа перед розыгрышем — полная тишина
+  • в последний час — сообщение каждые 15 минут
+Работает и на GitHub Actions, и локально.
 """
 import json
 import os
@@ -16,10 +18,13 @@ RPCS = ["https://bsc-dataseed.binance.org/",
         "https://bsc-dataseed1.defibit.io/",
         "https://bsc.publicnode.com"]
 
-TICKETS_ALERT = 500
-EDGE_ALERT = 0.50
-MIN_TICKETS_PROJECTION = 20
+FINAL_WINDOW = 3600        # секунд до конца раунда, когда начинаем писать
+SEND_EVERY = 900           # интервал сообщений внутри окна
+EDGE_GOOD = 0.50           # порог вердикта «играть»
+
+TIMEOUT_HINT = "билетов меньше 20 — прогноз не считается"
 STATE_FILE = "state.json"
+LOG_FILE = "lottery-monitor.log"
 
 P_MATCH = [0.09, 0.009, 0.0009, 0.00009, 0.000009, 0.000001]
 SHARE = [0.02, 0.03, 0.05, 0.10, 0.20, 0.40]
@@ -33,6 +38,16 @@ RC = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x800000008000
 ROT = [[0, 36, 3, 41, 18], [1, 44, 10, 45, 2], [62, 6, 43, 15, 61],
        [28, 55, 25, 21, 56], [27, 20, 39, 8, 14]]
 MASK = (1 << 64) - 1
+
+
+def log(msg):
+    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _rol(x, n):
@@ -91,18 +106,17 @@ def rpc(data):
     raise RuntimeError("RPC недоступны")
 
 
-def read_round():
-    rid = int(rpc("0x" + sel("currentLotteryId()")), 16)
-    raw = rpc("0x" + sel("viewLottery(uint256)") + format(rid, "064x"))
+def read_round(round_id=None):
+    if round_id is None:
+        round_id = int(rpc("0x" + sel("currentLotteryId()")), 16)
+    raw = rpc("0x" + sel("viewLottery(uint256)") + format(round_id, "064x"))
     body = raw[2:]
     v = [int(body[i:i + 64], 16) for i in range(0, len(body), 64)]
-    return {"round": rid, "start": v[1], "end": v[2], "price": v[3] / 1e18,
+    return {"round": round_id, "start": v[1], "end": v[2], "price": v[3] / 1e18,
             "tickets": v[25] - v[24], "pot": v[26] / 1e18}
 
 
 def ev_calc(pot, tickets, price):
-    if tickets <= 0:
-        return price, 0.0
     ev = 0.0
     for i in range(6):
         pool = pot * SHARE[i]
@@ -111,73 +125,112 @@ def ev_calc(pot, tickets, price):
     return ev, ev / price - 1
 
 
-def notify(text):
+def creds():
+    import re
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if token and chat:
+        return token, chat
+    try:
+        text = open(r"C:\AINews\run_agent.bat", encoding="utf-8", errors="ignore").read()
+        mt = re.search(r'TELEGRAM_BOT_TOKEN=([^\s"]+)', text)
+        mc = re.search(r'TELEGRAM_CHAT_ID=([^\s"]+)', text)
+        if mt and mc:
+            return mt.group(1), mc.group(1)
+    except Exception:
+        pass
+    return token, chat
+
+
+def notify(text):
+    token, chat = creds()
     if not token or not chat:
-        print("нет TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID")
+        log("нет токена/чата для Telegram")
         return False
     body = json.dumps({"chat_id": chat, "text": text}).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage",
                                  data=body, headers={"Content-Type": "application/json"})
     proxy = os.environ.get("PROXY", "")
-    opener = urllib.request.build_opener(
-        urllib.request.ProxyHandler({"http": proxy, "https": proxy})) if proxy else urllib.request.build_opener()
+    opener = (urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        if proxy else urllib.request.build_opener())
     try:
         with opener.open(req, timeout=25) as resp:
             return resp.status == 200
     except Exception as exc:
-        print("Telegram:", exc)
+        log(f"Telegram: {exc}")
         return False
 
 
-def main():
-    r = read_round()
-    now = time.time()
-    total = max(1, r["end"] - r["start"])
-    frac = max(0.01, min(1.0, (now - r["start"]) / total))
-    remaining = 1.0 - frac
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
 
-    line = (f"раунд {r['round']} | прошло {frac*100:.0f}% | билетов {r['tickets']} | "
-            f"банк {r['pot']:.0f} CAKE | цена {r['price']:.2f}")
-    print(line)
 
-    if r["tickets"] < MIN_TICKETS_PROJECTION:
-        print("мало данных для прогноза")
-        return
-
-    projected = r["tickets"] / frac
-    ev, edge = ev_calc(r["pot"], projected, r["price"])
-    print(f"прогноз билетов {projected:.0f} | EV {ev:.2f} ({edge*100:+.0f}%)")
-
-    if remaining > 0.35:
-        print("рано: прогноз нестабильный")
-        return
-    if projected >= TICKETS_ALERT or edge <= EDGE_ALERT:
-        print("условия не выполнены")
-        return
-
-    state = {}
-    if os.path.exists(STATE_FILE):
-        try:
-            state = json.load(open(STATE_FILE))
-        except Exception:
-            state = {}
-    if state.get("last_alert_round") == r["round"]:
-        print("по этому раунду уже предупреждали")
-        return
-
-    end_dt = datetime.fromtimestamp(r["end"], timezone.utc).strftime("%d.%m %H:%M UTC")
-    msg = (f"🎟 PancakeSwap Lottery, раунд {r['round']}\n"
-           f"билетов: {r['tickets']} (прогноз к концу {projected:.0f})\n"
-           f"банк: {r['pot']:.0f} CAKE\nбилет: {r['price']:.2f} CAKE\n"
-           f"EV: {ev:.2f} CAKE ({edge*100:+.0f}%)\nконец раунда: {end_dt}")
-    if notify(msg):
-        print("алерт отправлен")
-        state["last_alert_round"] = r["round"]
-        state["sent_at"] = datetime.now(timezone.utc).isoformat()
+def save_state(state):
+    try:
         with open(STATE_FILE, "w", encoding="utf-8") as fh:
             json.dump(state, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def check(force=False):
+    r = read_round()
+    now = time.time()
+    remaining = r["end"] - now
+
+    if remaining <= 0:
+        log(f"раунд {r['round']} закрыт, ждём новый")
+        return
+    if remaining > FINAL_WINDOW and not force:
+        log(f"раунд {r['round']}: до розыгрыша {remaining/3600:.1f} ч — молчим")
+        return
+
+    state = load_state()
+    last_ts = state.get("last_sent_ts", 0)
+    same_round = state.get("last_sent_round") == r["round"]
+    if not force and same_round and (now - last_ts) < SEND_EVERY:
+        log(f"раунд {r['round']}: окно открыто, ждём интервал ({int(SEND_EVERY - (now - last_ts))} с)")
+        return
+
+    tickets = r["tickets"]
+    minutes = int(remaining // 60)
+    head = f"🎟 Раунд {r['round']} · до розыгрыша {minutes} мин"
+    mid = f"билетов: {tickets}\nбанк: {r['pot']:.0f} CAKE · билет: {r['price']:.2f} CAKE"
+
+    if tickets < 20:
+        verdict = "билетов почти нет — считать нечего, ставку не рекомендую"
+        text = f"{head}\n{mid}\n{verdict}"
+    else:
+        ev, edge = ev_calc(r["pot"], tickets, r["price"])
+        verdict = ("ИГРАТЬ: перевес в твою пользу" if edge > EDGE_GOOD
+                   else "НЕ играть: перевес недостаточный")
+        text = (f"{head}\n{mid}\nEV: {ev:.2f} CAKE ({edge*100:+.0f}%)\n{verdict}")
+
+    log(f"раунд {r['round']}: отправляю (билетов {tickets}, осталось {minutes} мин)")
+    if notify(text):
+        state["last_sent_ts"] = now
+        state["last_sent_round"] = r["round"]
+        save_state(state)
+        log("сообщение отправлено")
+
+
+def main():
+    once = "--once" in sys.argv
+    interval = int(os.environ.get("CHECK_INTERVAL", "60"))
+    log("монитор запущен" + (" (разовый прогон)" if once else f", интервал {interval} с"))
+    while True:
+        try:
+            check(force=once)
+        except Exception as exc:
+            log(f"ошибка цикла: {exc}")
+        if once:
+            return
+        time.sleep(interval)
 
 
 if __name__ == "__main__":
