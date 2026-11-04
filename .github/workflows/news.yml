@@ -2,8 +2,8 @@
 
 on:
   schedule:
-    # 15:00 по Москве = 12:00 UTC
-    - cron: "0 12 * * *"
+    # 06:00 по Москве = 03:00 UTC
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
