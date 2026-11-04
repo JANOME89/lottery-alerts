@@ -1,8 +1,9 @@
-name: Lottery check
+﻿name: Lottery check
+# schedule registration bump
 
 on:
   schedule:
-    # каждые 20 минут; GitHub может задерживать запуск на 5-15 минут — это нормально
+    # РєР°Р¶РґС‹Рµ 20 РјРёРЅСѓС‚; GitHub РјРѕР¶РµС‚ Р·Р°РґРµСЂР¶РёРІР°С‚СЊ Р·Р°РїСѓСЃРє РЅР° 5-15 РјРёРЅСѓС‚ вЂ” СЌС‚Рѕ РЅРѕСЂРјР°Р»СЊРЅРѕ
     - cron: "*/20 * * * *"
   workflow_dispatch: {}
 
