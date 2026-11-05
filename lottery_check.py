@@ -1,10 +1,10 @@
-﻿# -*- coding: utf-8 -*-
-"""РњРѕРЅРёС‚РѕСЂ Р»РѕС‚РµСЂРµРё PancakeSwap.
+# -*- coding: utf-8 -*-
+"""Монитор лотереи PancakeSwap.
 
-РџСЂР°РІРёР»Рѕ СѓРІРµРґРѕРјР»РµРЅРёР№:
-  вЂў РІРЅРµ РїРѕСЃР»РµРґРЅРµРіРѕ С‡Р°СЃР° РїРµСЂРµРґ СЂРѕР·С‹РіСЂС‹С€РµРј вЂ” РїРѕР»РЅР°СЏ С‚РёС€РёРЅР°
-  вЂў РІ РїРѕСЃР»РµРґРЅРёР№ С‡Р°СЃ вЂ” СЃРѕРѕР±С‰РµРЅРёРµ РєР°Р¶РґС‹Рµ 15 РјРёРЅСѓС‚
-Р Р°Р±РѕС‚Р°РµС‚ Рё РЅР° GitHub Actions, Рё Р»РѕРєР°Р»СЊРЅРѕ.
+Правило уведомлений:
+  • вне последнего часа перед розыгрышем — полная тишина
+  • в последний час — сообщение каждые 15 минут
+Работает и на GitHub Actions, и локально.
 """
 import json
 import os
@@ -18,11 +18,11 @@ RPCS = ["https://bsc-dataseed.binance.org/",
         "https://bsc-dataseed1.defibit.io/",
         "https://bsc.publicnode.com"]
 
-FINAL_WINDOW = 3600        # СЃРµРєСѓРЅРґ РґРѕ РєРѕРЅС†Р° СЂР°СѓРЅРґР°, РєРѕРіРґР° РЅР°С‡РёРЅР°РµРј РїРёСЃР°С‚СЊ
-SEND_EVERY = 900           # РёРЅС‚РµСЂРІР°Р» СЃРѕРѕР±С‰РµРЅРёР№ РІРЅСѓС‚СЂРё РѕРєРЅР°
-EDGE_GOOD = 0.50           # РїРѕСЂРѕРі РІРµСЂРґРёРєС‚Р° В«РёРіСЂР°С‚СЊВ»
+FINAL_WINDOW = 3600        # секунд до конца раунда, когда начинаем писать
+SEND_EVERY = 900           # интервал сообщений внутри окна
+EDGE_GOOD = 0.50           # порог вердикта «играть»
 
-TIMEOUT_HINT = "Р±РёР»РµС‚РѕРІ РјРµРЅСЊС€Рµ 20 вЂ” РїСЂРѕРіРЅРѕР· РЅРµ СЃС‡РёС‚Р°РµС‚СЃСЏ"
+TIMEOUT_HINT = "билетов меньше 20 — прогноз не считается"
 STATE_FILE = "state.json"
 LOG_FILE = "lottery-monitor.log"
 
@@ -103,7 +103,7 @@ def rpc(data):
                 return out["result"]
         except Exception:
             continue
-    raise RuntimeError("RPC РЅРµРґРѕСЃС‚СѓРїРЅС‹")
+    raise RuntimeError("RPC недоступны")
 
 
 def read_round(round_id=None):
@@ -145,7 +145,7 @@ def creds():
 def notify(text):
     token, chat = creds()
     if not token or not chat:
-        log("РЅРµС‚ С‚РѕРєРµРЅР°/С‡Р°С‚Р° РґР»СЏ Telegram")
+        log("нет токена/чата для Telegram")
         return False
     body = json.dumps({"chat_id": chat, "text": text}).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage",
@@ -184,51 +184,51 @@ def check(force=False):
     remaining = r["end"] - now
 
     if remaining <= 0:
-        log(f"СЂР°СѓРЅРґ {r['round']} Р·Р°РєСЂС‹С‚, Р¶РґС‘Рј РЅРѕРІС‹Р№")
+        log(f"раунд {r['round']} закрыт, ждём новый")
         return
     if remaining > FINAL_WINDOW and not force:
-        log(f"СЂР°СѓРЅРґ {r['round']}: РґРѕ СЂРѕР·С‹РіСЂС‹С€Р° {remaining/3600:.1f} С‡ вЂ” РјРѕР»С‡РёРј")
+        log(f"раунд {r['round']}: до розыгрыша {remaining/3600:.1f} ч — молчим")
         return
 
     state = load_state()
     last_ts = state.get("last_sent_ts", 0)
     same_round = state.get("last_sent_round") == r["round"]
     if not force and same_round and (now - last_ts) < SEND_EVERY:
-        log(f"СЂР°СѓРЅРґ {r['round']}: РѕРєРЅРѕ РѕС‚РєСЂС‹С‚Рѕ, Р¶РґС‘Рј РёРЅС‚РµСЂРІР°Р» ({int(SEND_EVERY - (now - last_ts))} СЃ)")
+        log(f"раунд {r['round']}: окно открыто, ждём интервал ({int(SEND_EVERY - (now - last_ts))} с)")
         return
 
     tickets = r["tickets"]
     minutes = int(remaining // 60)
-    head = f"рџЋџ Р Р°СѓРЅРґ {r['round']} В· РґРѕ СЂРѕР·С‹РіСЂС‹С€Р° {minutes} РјРёРЅ"
-    mid = f"Р±РёР»РµС‚РѕРІ: {tickets}\nР±Р°РЅРє: {r['pot']:.0f} CAKE В· Р±РёР»РµС‚: {r['price']:.2f} CAKE"
+    head = f"🎟 Раунд {r['round']} · до розыгрыша {minutes} мин"
+    mid = f"билетов: {tickets}\nбанк: {r['pot']:.0f} CAKE · билет: {r['price']:.2f} CAKE"
 
     if tickets < 20:
-        verdict = "Р±РёР»РµС‚РѕРІ РїРѕС‡С‚Рё РЅРµС‚ вЂ” СЃС‡РёС‚Р°С‚СЊ РЅРµС‡РµРіРѕ, СЃС‚Р°РІРєСѓ РЅРµ СЂРµРєРѕРјРµРЅРґСѓСЋ"
+        verdict = "билетов почти нет — считать нечего, ставку не рекомендую"
         text = f"{head}\n{mid}\n{verdict}"
     else:
         ev, edge = ev_calc(r["pot"], tickets, r["price"])
-        verdict = ("РР“Р РђРўР¬: РїРµСЂРµРІРµСЃ РІ С‚РІРѕСЋ РїРѕР»СЊР·Сѓ" if edge > EDGE_GOOD
-                   else "РќР• РёРіСЂР°С‚СЊ: РїРµСЂРµРІРµСЃ РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅС‹Р№")
+        verdict = ("ИГРАТЬ: перевес в твою пользу" if edge > EDGE_GOOD
+                   else "НЕ играть: перевес недостаточный")
         text = (f"{head}\n{mid}\nEV: {ev:.2f} CAKE ({edge*100:+.0f}%)\n{verdict}")
 
-    log(f"СЂР°СѓРЅРґ {r['round']}: РѕС‚РїСЂР°РІР»СЏСЋ (Р±РёР»РµС‚РѕРІ {tickets}, РѕСЃС‚Р°Р»РѕСЃСЊ {minutes} РјРёРЅ)")
+    log(f"раунд {r['round']}: отправляю (билетов {tickets}, осталось {minutes} мин)")
     if notify(text):
         state["last_sent_ts"] = now
         state["last_sent_round"] = r["round"]
         save_state(state)
-        log("СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ")
+        log("сообщение отправлено")
 
 
 def main():
     once = "--once" in sys.argv
     force = "--force" in sys.argv
     interval = int(os.environ.get("CHECK_INTERVAL", "60"))
-    log("РјРѕРЅРёС‚РѕСЂ Р·Р°РїСѓС‰РµРЅ" + (" (СЂР°Р·РѕРІС‹Р№ РїСЂРѕРіРѕРЅ)" if once else f", РёРЅС‚РµСЂРІР°Р» {interval} СЃ"))
+    log("разовый прогон" if once else f"монитор запущен, интервал {interval} с")
     while True:
         try:
             check(force=force)
         except Exception as exc:
-            log(f"РѕС€РёР±РєР° С†РёРєР»Р°: {exc}")
+            log(f"ошибка цикла: {exc}")
         if once:
             return
         time.sleep(interval)
