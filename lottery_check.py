@@ -23,8 +23,12 @@ SEND_EVERY = 900           # интервал сообщений внутри о
 EDGE_GOOD = 0.50           # порог вердикта «играть»
 
 TIMEOUT_HINT = "билетов меньше 20 — прогноз не считается"
-STATE_FILE = "state.json"
-LOG_FILE = "lottery-monitor.log"
+if os.name == "nt":
+    STATE_FILE = r"D:\lottery-monitor-state.json"
+    LOG_FILE = r"D:\lottery-monitor.log"
+else:
+    STATE_FILE = "state.json"
+    LOG_FILE = "lottery-monitor.log"
 
 P_MATCH = [0.09, 0.009, 0.0009, 0.00009, 0.000009, 0.000001]
 SHARE = [0.02, 0.03, 0.05, 0.10, 0.20, 0.40]
@@ -203,13 +207,24 @@ def check(force=False):
     mid = f"билетов: {tickets}\nбанк: {r['pot']:.0f} CAKE · билет: {r['price']:.2f} CAKE"
 
     if tickets < 20:
-        verdict = "билетов почти нет — считать нечего, ставку не рекомендую"
+        pool1 = r["pot"] * SHARE[0]
+        cost = 10 * r["price"]
+        verdict = (
+            f"конкурентов почти нет.\n"
+            f"Если взять 10 билетов с разными первыми цифрами (0–9), "
+            f"первое число угадано гарантированно.\n"
+            f"При нуле чужих билетов первая корзина ≈ {pool1:.0f} CAKE "
+            f"за {cost:.0f} CAKE затрат.\n"
+            f"Заходить только если и в последние минуты билетов не прибавилось."
+        )
         text = f"{head}\n{mid}\n{verdict}"
     else:
         ev, edge = ev_calc(r["pot"], tickets, r["price"])
+        share1 = (r["pot"] * SHARE[0]) / (tickets * 0.1)
         verdict = ("ИГРАТЬ: перевес в твою пользу" if edge > EDGE_GOOD
                    else "НЕ играть: перевес недостаточный")
-        text = (f"{head}\n{mid}\nEV: {ev:.2f} CAKE ({edge*100:+.0f}%)\n{verdict}")
+        text = (f"{head}\n{mid}\nEV: {ev:.2f} CAKE ({edge*100:+.0f}%)\n"
+                f"доля за 1 угаданное число: ≈{share1:.1f} CAKE\n{verdict}")
 
     log(f"раунд {r['round']}: отправляю (билетов {tickets}, осталось {minutes} мин)")
     if notify(text):
