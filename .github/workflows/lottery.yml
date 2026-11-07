@@ -1,19 +1,24 @@
-﻿name: Lottery check
-# schedule registration bump
+name: Lottery check
+# v3: один длинный прогон вместо частого cron
 
 on:
   schedule:
-    # РєР°Р¶РґС‹Рµ 20 РјРёРЅСѓС‚; GitHub РјРѕР¶РµС‚ Р·Р°РґРµСЂР¶РёРІР°С‚СЊ Р·Р°РїСѓСЃРє РЅР° 5-15 РјРёРЅСѓС‚ вЂ” СЌС‚Рѕ РЅРѕСЂРјР°Р»СЊРЅРѕ
-    - cron: "*/15 * * * *"
+    # запуск каждые 6 часов; каждый прогон живёт ~5.85 ч, то есть окно
+    # последнего часа розыгрыша почти всегда попадает внутрь работающего джоба
+    - cron: "0 0,6,12,18 * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: write
 
+concurrency:
+  group: lottery
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 357
     steps:
       - uses: actions/checkout@v4
 
@@ -21,18 +26,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run check
+      - name: Run check loop
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python lottery_check.py --once
+          CHECK_INTERVAL: "60"
+        run: python lottery_check.py --loop-hours 5.85
 
       - name: Save state
+        if: always()
         run: |
           if [ -f state.json ]; then
             git config user.name "lottery-bot"
             git config user.email "lottery-bot@users.noreply.github.com"
             git add state.json
             git diff --cached --quiet || git commit -m "state: round $(date -u +%FT%T)"
-            git push
+            git pull --rebase --autostash || true
+            git push || true
           fi

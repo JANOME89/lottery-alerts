@@ -238,13 +238,34 @@ def main():
     once = "--once" in sys.argv
     force = "--force" in sys.argv
     interval = int(os.environ.get("CHECK_INTERVAL", "60"))
-    log("разовый прогон" if once else f"монитор запущен, интервал {interval} с")
+
+    # сколько работать непрерывно: 0 = бесконечно (локальный режим)
+    loop_hours = 0.0
+    for arg in sys.argv:
+        if arg.startswith("--loop-hours="):
+            loop_hours = float(arg.split("=", 1)[1])
+    if loop_hours <= 0 and "--loop-hours" in sys.argv:
+        idx = sys.argv.index("--loop-hours")
+        if idx + 1 < len(sys.argv):
+            loop_hours = float(sys.argv[idx + 1])
+
+    deadline = time.time() + loop_hours * 3600 if loop_hours > 0 else None
+    if once:
+        log("разовый прогон")
+    elif deadline:
+        log(f"цикл на {loop_hours:.1f} ч, интервал {interval} с")
+    else:
+        log(f"монитор запущен, интервал {interval} с")
+
     while True:
         try:
             check(force=force)
         except Exception as exc:
             log(f"ошибка цикла: {exc}")
         if once:
+            return
+        if deadline and time.time() >= deadline:
+            log("время цикла вышло — завершаюсь")
             return
         time.sleep(interval)
 
