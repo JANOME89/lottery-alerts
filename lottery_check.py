@@ -116,8 +116,22 @@ def read_round(round_id=None):
     raw = rpc("0x" + sel("viewLottery(uint256)") + format(round_id, "064x"))
     body = raw[2:]
     v = [int(body[i:i + 64], 16) for i in range(0, len(body), 64)]
+
+    first_id = v[24]
+    next_id = v[25]
+    tickets = next_id - first_id
+
+    # В живом раунде firstTicketIdNextLottery ещё не проставлен (равен 0),
+    # поэтому считаем по глобальному счётчику currentTicketId.
+    if tickets <= 0:
+        try:
+            current_id = int(rpc("0x" + sel("currentTicketId()")), 16)
+            tickets = max(0, current_id - first_id)
+        except Exception:
+            tickets = 0
+
     return {"round": round_id, "start": v[1], "end": v[2], "price": v[3] / 1e18,
-            "tickets": v[25] - v[24], "pot": v[26] / 1e18}
+            "tickets": tickets, "pot": v[26] / 1e18}
 
 
 def ev_calc(pot, tickets, price):
