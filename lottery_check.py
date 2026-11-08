@@ -19,7 +19,9 @@ RPCS = ["https://bsc-dataseed.binance.org/",
         "https://bsc.publicnode.com"]
 
 FINAL_WINDOW = 3600        # секунд до конца раунда, когда начинаем писать
-SEND_EVERY = 900           # интервал сообщений внутри окна
+SEND_EVERY = 900           # интервал сообщений внутри часа
+FAST_WINDOW = 900          # последние 15 минут — особый режим
+FAST_SEND_EVERY = 60       # в них пишем каждую минуту
 EDGE_GOOD = 0.50           # порог вердикта «играть»
 
 TIMEOUT_HINT = "билетов меньше 20 — прогноз не считается"
@@ -211,13 +213,18 @@ def check(force=False):
     state = load_state()
     last_ts = state.get("last_sent_ts", 0)
     same_round = state.get("last_sent_round") == r["round"]
-    if not force and same_round and (now - last_ts) < SEND_EVERY:
-        log(f"раунд {r['round']}: окно открыто, ждём интервал ({int(SEND_EVERY - (now - last_ts))} с)")
+
+    # в последние 15 минут пишем каждую минуту, до этого — раз в 15 минут
+    fast_mode = remaining <= FAST_WINDOW
+    send_every = FAST_SEND_EVERY if fast_mode else SEND_EVERY
+    if not force and same_round and (now - last_ts) < send_every:
+        log(f"раунд {r['round']}: окно открыто, ждём интервал ({int(send_every - (now - last_ts))} с)")
         return
 
     tickets = r["tickets"]
     minutes = int(remaining // 60)
-    head = f"🎟 Раунд {r['round']} · до розыгрыша {minutes} мин"
+    mark = "🔔 ФИНАЛЬНЫЕ МИНУТЫ · " if fast_mode else ""
+    head = f"🎟 {mark}Раунд {r['round']} · до розыгрыша {minutes} мин"
     mid = f"билетов: {tickets}\nбанк: {r['pot']:.0f} CAKE · билет: {r['price']:.2f} CAKE"
 
     if tickets < 20:
