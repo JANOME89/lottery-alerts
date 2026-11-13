@@ -24,6 +24,8 @@ FAST_WINDOW = 900          # последние 15 минут — особый �
 FAST_SEND_EVERY = 60       # в них пишем каждую минуту
 EDGE_GOOD = 0.50           # порог вердикта «играть»
 
+BRACKET_LABELS = ["1 число", "2 числа", "3 числа", "4 числа", "5 чисел", "6 чисел"]
+
 TIMEOUT_HINT = "билетов меньше 20 — прогноз не считается"
 if os.name == "nt":
     STATE_FILE = r"D:\lottery-monitor-state.json"
@@ -136,6 +138,110 @@ def read_round(round_id=None):
             "tickets": tickets, "pot": v[26] / 1e18}
 
 
+
+def fmt_cake(value):
+    """Число в формате 18 328.03"""
+    return f"{value:,.2f}".replace(",", " ")
+
+
+def read_finished_round(round_id):
+    """Читает завершённый раунд: победители по корзинам и призы."""
+    raw = rpc("0x" + sel("viewLottery(uint256)") + format(round_id, "064x"))
+    body = raw[2:]
+    v = [int(body[i:i + 64], 16) for i in range(0, len(body), 64)]
+    return {
+        "round": round_id,
+        "status": v[0],                      # 0 pending, 1 open, 2 claimable, 3 closed
+        "start": v[1],
+        "end": v[2],
+        "price": v[3] / 1e18,
+        "pot": v[26] / 1e18,
+        "final": v[27],
+        "cake_per_bracket": [v[12 + i] / 1e18 for i in range(6)],
+        "winners": [v[18 + i] for i in range(6)],
+        "tickets": max(0, v[25] - v[24]),
+    }
+
+
+def build_results_text(info, skipped=0):
+    lines = [f"🏆 Итоги раунда #{info['round']}", ""]
+    if skipped:
+        lines.append(f"⚠️ пропущено раундов: {skipped} (монитор не работал)")
+        lines.append("")
+    lines.append(f"🎫 Билетов: {info['tickets']}")
+    lines.append(f"💰 Банк: {fmt_cake(info['pot'])} CAKE")
+    lines.append(f"🔢 Победное число: {info['final']}")
+    lines.append("")
+
+    winners = info["winners"]
+    prizes = info["cake_per_bracket"]
+    total_winners = sum(winners)
+    total_paid = 0.0
+    rows = []
+    for i in range(6):
+        if winners[i] > 0:
+            per = prizes[i]
+            paid = per * winners[i]
+            total_paid += paid
+            rows.append(f"• {BRACKET_LABELS[i]} — {winners[i]} чел. × {fmt_cake(per)} = {fmt_cake(paid)} CAKE")
+
+    if not rows:
+        lines.append("😕 Победителей нет — банк перешёл в следующий раунд")
+    else:
+        lines.append("👥 Победители по корзинам:")
+        lines.extend(rows)
+        lines.append("")
+        lines.append(f"Всего победителей: {total_winners}")
+        suffix = ""
+        if info["pot"] > 0:
+            suffix = f" ({total_paid / info['pot'] * 100:.1f}% банка)"
+        lines.append(f"Выплачено: {fmt_cake(total_paid)} CAKE{suffix}")
+
+    return "\n".join(lines)
+
+
+def report_results(force=False, dry=False):
+    """Сообщает итоги последнего завершённого раунда (один раз на раунд)."""
+    state = load_state()
+    cur = int(rpc("0x" + sel("currentLotteryId()")), 16)
+    last = state.get("last_results_round")
+
+    if last is None:
+        # первый запуск: не спамим историей, просто запоминаем предыдущий раунд
+        state["last_results_round"] = cur - 1
+        save_state(state)
+        log(f"итоги: стартовая отметка — раунд {cur - 1} уже учтён")
+        return
+
+    target = cur - 1
+    if target < 1:
+        return
+    if not force and target <= last:
+        return
+    if force and target < last:
+        target = last
+
+    skipped = 0 if force else max(0, target - last - 1)
+    info = read_finished_round(target)
+    if info["status"] not in (2, 3):
+        log(f"итоги: раунд {target} ещё не завершён (status={info['status']})")
+        return
+
+    text = build_results_text(info, skipped)
+    if dry:
+        print("\n=== СООБЩЕНИЕ (не отправлено) ===")
+        print(text)
+        print("=================================")
+    else:
+        ok = notify(text)
+        log(f"итоги раунда {target}: " + ("отправлено" if ok else "НЕ отправлено"))
+        if not ok:
+            return
+
+    state["last_results_round"] = target
+    save_state(state)
+
+
 def ev_calc(pot, tickets, price):
     ev = 0.0
     for i in range(6):
@@ -199,6 +305,12 @@ def save_state(state):
 
 
 def check(force=False):
+    # сначала проверяем, не завершился ли предыдущий раунд — шлём итоги
+    try:
+        report_results()
+    except Exception as exc:
+        log(f"итоги: {exc}")
+
     r = read_round()
     now = time.time()
     remaining = r["end"] - now
@@ -256,6 +368,10 @@ def check(force=False):
 
 
 def main():
+    if "--results" in sys.argv:
+        report_results(force=True, dry="--dry" in sys.argv)
+        return
+
     once = "--once" in sys.argv
     force = "--force" in sys.argv
     interval = int(os.environ.get("CHECK_INTERVAL", "60"))
