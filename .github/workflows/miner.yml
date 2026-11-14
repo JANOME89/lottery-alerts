@@ -7,7 +7,12 @@ on:
   schedule:
     # каждые 15 минут (GitHub может задерживать запуск на несколько минут)
     - cron: "*/15 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: "Симуляция состояния: offline (для проверки тревоги)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -31,6 +36,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SIMULATE: ${{ inputs.simulate }}
         run: python miner_check.py
 
       - name: Save state

@@ -96,12 +96,19 @@ def main():
         print("тест:", "ok" if ok else "fail")
         return
 
-    try:
-        w = fetch_worker()
-    except Exception as exc:
-        # API недоступен — не паникуем, просто сообщаем, если долго
-        print("ошибка API:", exc)
-        return
+    sim = os.environ.get("SIMULATE", "").strip().lower()
+    if sim == "offline":
+        import time as _t
+        w = {"worker": WORKER, "status": "offline", "valid": 0,
+             "avg_hashrate_30m": None, "avg_hashrate_24h": None,
+             "last_share": int(_t.time() * 1000) - 60 * 60 * 1000}
+        print("СИМУЛЯЦИЯ: воркер принудительно offline")
+    else:
+        try:
+            w = fetch_worker()
+        except Exception as exc:
+            print("ошибка API:", exc)
+            return
 
     state = load_state()
     prev = state.get("status", "unknown")
