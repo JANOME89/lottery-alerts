@@ -1,0 +1,48 @@
+name: Miner watch (external)
+
+# Внешняя проверка майнера Pearl через публичный API Kryptex Pool.
+# Работает даже если ПК выключен: пул скажет, что воркер rig1 офлайн.
+
+on:
+  schedule:
+    # каждые 15 минут (GitHub может задерживать запуск на несколько минут)
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: miner-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check miner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python miner_check.py
+
+      - name: Save state
+        if: always()
+        run: |
+          if [ -f miner-state.json ]; then
+            git config user.name "miner-bot"
+            git config user.email "bot@local"
+            git add miner-state.json
+            if ! git diff --staged --quiet; then
+              git commit -m "miner state $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              git pull --rebase origin main || true
+              git push || true
+            fi
+          fi
