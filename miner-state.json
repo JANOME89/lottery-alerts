@@ -1,8 +1,8 @@
 {
  "status": "online",
- "last_check": "2026-11-25T11:42:10+00:00",
- "last_hashrate_30m": "140111988407082.0977777777778",
- "last_hashrate_24h": "123953239744062.96",
- "last_shares": 1206,
- "minutes_since_share": 0.1
+ "last_check": "2026-11-25T20:39:08+00:00",
+ "last_hashrate_30m": "165131986336918.1866666666667",
+ "last_hashrate_24h": "127080739485292.47",
+ "last_shares": 1249,
+ "minutes_since_share": 0.2
 }
