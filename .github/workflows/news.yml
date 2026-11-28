@@ -1,9 +1,9 @@
-﻿name: News to Telegram
+name: News to Telegram
 
 on:
   schedule:
-    # 06:00 по Москве = 03:00 UTC
-    - cron: "0 3 * * *"
+    # 15:00 по Москве = 12:00 UTC
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
