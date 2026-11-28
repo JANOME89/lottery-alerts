@@ -47,8 +47,6 @@ const TWITTER_FEEDS = [
 const CONFIG = {
   windowHours: 24,          // глубина выборки новостей
   activityWindowHours: 48,  // аирдропы/тестнеты живут дольше — берём за 2 дня
-  localWindowHours: 168,    // локальные новости редкие — берём за 7 дней
-  dealsWindowHours: 336,    // акции и скидки — за 14 дней
   maxItems: 20,             // сколько новостей попадёт в дайджест
   maxPerFeed: 3,            // не более N новостей из одной ленты (баланс источников)
   requestTimeoutMs: 20000,  // таймаут одного HTTP-запроса
@@ -83,21 +81,6 @@ const CONFIG = {
     { name: 'Habr DIY', url: 'https://habr.com/ru/rss/hubs/diy/?fl=ru', category: 'geek' },
     { name: 'Habr Лайфхаки', url: 'https://habr.com/ru/rss/hubs/lifehacks/?fl=ru', category: 'geek' },
 
-    // --- Локальные новости: Лениногорск и Татнефть ---
-    { name: 'Татар-информ', url: 'https://tatar-inform.ru/rss', category: 'local', maxPerFeed: 4 },
-    { name: 'Bing: Лениногорск', url: 'https://www.bing.com/news/search?q=%D0%9B%D0%B5%D0%BD%D0%B8%D0%BD%D0%BE%D0%B3%D0%BE%D1%80%D1%81%D0%BA&format=rss', category: 'local', maxPerFeed: 3 },
-    { name: 'Bing: Татнефть', url: 'https://www.bing.com/news/search?q=%D0%A2%D0%B0%D1%82%D0%BD%D0%B5%D1%84%D1%82%D1%8C&format=rss', category: 'local', maxPerFeed: 3 },
-    { name: 'Лениногорск (портал)', url: 'https://leninogorsk.tatarstan.ru/rss', category: 'local', optional: true, maxPerFeed: 3 },
-
-    // --- Скидки и акции ритейла ---
-    { name: 'New Retail', url: 'https://new-retail.ru/rss/', category: 'deals', maxPerFeed: 3 },
-    { name: 'Sostav', url: 'https://www.sostav.ru/rss/', category: 'deals', maxPerFeed: 2 },
-    { name: 'Bing: Распродажа', url: 'https://www.bing.com/news/search?q=%D1%80%D0%B0%D1%81%D0%BF%D1%80%D0%BE%D0%B4%D0%B0%D0%B6%D0%B0&format=rss', category: 'deals', maxPerFeed: 2 },
-    { name: 'Bing: Скидки', url: 'https://www.bing.com/news/search?q=%D1%81%D0%BA%D0%B8%D0%B4%D0%BA%D0%B8&format=rss', category: 'deals', maxPerFeed: 2 },
-    { name: 'Bing: Промокоды', url: 'https://www.bing.com/news/search?q=%D0%BF%D1%80%D0%BE%D0%BC%D0%BE%D0%BA%D0%BE%D0%B4%D1%8B&format=rss', category: 'deals', maxPerFeed: 2 },
-    { name: 'Bing: Акции магазинов', url: 'https://www.bing.com/news/search?q=%D0%B0%D0%BA%D1%86%D0%B8%D0%B8+%D0%BC%D0%B0%D0%B3%D0%B0%D0%B7%D0%B8%D0%BD&format=rss', category: 'deals', maxPerFeed: 2 },
-    { name: 'Bing: Пятёрочка', url: 'https://www.bing.com/news/search?q=%D0%9F%D1%8F%D1%82%D1%91%D1%80%D0%BE%D1%87%D0%BA%D0%B0+%D1%81%D0%BA%D0%B8%D0%B4%D0%BA%D0%B8&format=rss', category: 'deals', maxPerFeed: 2, optional: true },
-    { name: 'Bing: Магнит', url: 'https://www.bing.com/news/search?q=%D0%9C%D0%B0%D0%B3%D0%BD%D0%B8%D1%82+%D0%B0%D0%BA%D1%86%D0%B8%D0%B8&format=rss', category: 'deals', maxPerFeed: 2, optional: true },
   ],
 };
 
@@ -476,23 +459,6 @@ const KEYWORDS = [
   [/(self[- ]?hosted|селфхост|show hn)/i, 3],
   [/(лайфхак|\blifehack)/i, 3],
 
-  // --- Локальные новости: Лениногорск и Татнефть (высший приоритет, +10) ---
-  [/(лениногорск|leninogorsk)/i, 10],
-  [/(татнефть|tatneft)/i, 10],
-  [/(лениногорскнефть)/i, 10],
-  [/(нгду)/i, 10],
-  [/(татарстан)/i, 10],
-
-  // --- Скидки и акции ритейла (+8) ---
-  [/(пятёрочк|пятерочк)/i, 8],
-  [/(магнит)/i, 8],
-  [/(красное\s*&?\s*белое|к&б|\bкб\b)/i, 8],
-  [/(бристоль)/i, 8],
-  [/(скидк)/i, 8],
-  [/(акци)/i, 8],
-  [/(распродаж)/i, 8],
-  [/(выгодн\w*\s+цен)/i, 8],
-  [/(каталог\s+товаров)/i, 8],
 ];
 
 function cleanSummary(text) {
@@ -518,23 +484,6 @@ function summarize(text, max = 240) {
 const ACTIVITY_RE =
   /(airdrop|аирдроп|эйрдроп|эирдроп|testnet|тестнет|retrodrop|ретродроп|gamefi|play-to-earn|p2e|криптоигр|presale|launchpad|\bthread\b|тред|giveaway|гивэвэй|whitelist|вайтлист|\bwl\b|ton\s*game)/i;
 
-// Гео-маркеры локальных новостей (Лениногорск / Татнефть).
-// «Татарстан» остаётся в скоринге, но сам по себе в локальную секцию не пропускает.
-const LOCAL_RE =
-  /(лениногорск|leninogorsk|татнефть|tatneft|лениногорскнефть|нгду)/i;
-
-// Маркеры скидок и акций ритейла.
-const DEALS_RE =
-  /(пятёрочк|пятерочк|магнит|красное\s*&?\s*белое|к&б|кб|бристоль|скидк|акци|распродаж|выгодн\w*\s+цен|каталог\s+товаров|промо)/i;
-
-// Для раздела скидок нужен именно признак промо (а не «акции» = ценные бумаги).
-const DEALS_PROMO_RE =
-  /(скидк|распродаж|промо|выгодн\w*\s+цен|каталог\s+товаров|спецпредложен|дисконт|акци\w*\s+(на|в|со|от|в\s+магазин))/i;
-
-// Фондовые новости про «акции Магнита» в скидки не пускаем.
-const STOCKS_RE =
-  /(фондов|бирж|котиров|дивиденд|капитализац|техническ\w*\s+анализ|сопротивлени|\bmgnt\b|инвестор|мосбирж|обвалил|подскочил)/i;
-
 // Признак того, что новость действительно про крипту (фильтр офтопа из общих лент).
 const CRYPTO_MARKER_RE =
   /(crypto|крипт|bitcoin|биткоин|\bbtc\b|ethereum|эфир\w*|\beth\b|blockchain|блокчейн|\btoken\b|токен|nft|defi|web3|stablecoin|стейблкоин|airdrop|аирдроп|testnet|тестнет|retrodrop|ретродроп|gamefi|play-to-earn|p2e|mining|майнинг|wallet|кошел\w*|exchange|бирж\w*|binance|solana|toncoin|ledger|halving|халвинг|\betf\b|\bdao\b|metaverse|метавселен)/i;
@@ -545,16 +494,6 @@ function scoreItem(item, now) {
   if (item.title.length < 15) return -Infinity;
   // В крипто-раздел не пускаем новости, где нет ни одного крипто-признака.
   if (item.category === 'crypto' && !CRYPTO_MARKER_RE.test(text)) return -Infinity;
-  // В локальный раздел — только новости про Лениногорск/Татнефть/Татарстан.
-  if (item.category === 'local' && !LOCAL_RE.test(text)) return -Infinity;
-  // В раздел скидок — только материалы про акции и торговые сети.
-  if (item.category === 'deals') {
-    if (!DEALS_RE.test(text)) return -Infinity;
-    if (STOCKS_RE.test(text)) return -Infinity;
-    if (!DEALS_PROMO_RE.test(text)) return -Infinity;
-    // Скидки Беларуси/Казахстана/Украины для читателя из Татарстана нерелевантны.
-    if (/(беларус|минск|казахстан|украин|киев)/i.test(text)) return -Infinity;
-  }
 
   let score = 0;
   // Приоритет узкопрофильных источников: EGamers — всегда, AirdropAlert — только для активностей.
@@ -581,8 +520,6 @@ function inWindow(item, now, hours) {
   if (!item.publishedAt) return true;
   const text = `${item.title} ${item.summary}`;
   let limit = ACTIVITY_RE.test(text) ? CONFIG.activityWindowHours : hours;
-  if (item.category === 'local') limit = CONFIG.localWindowHours;
-  if (item.category === 'deals') limit = CONFIG.dealsWindowHours;
   const age = now - item.publishedAt.getTime();
   return age <= limit * 36e5 && age >= -2 * 36e5;
 }
@@ -741,13 +678,11 @@ function formatDigest(items, now) {
   const geekItems = items.filter((item) => item.category === 'geek');
   const activityItems = items.filter((item) => item.category === 'crypto' && item.activity);
   const cryptoItems = items.filter((item) => item.category === 'crypto' && !item.activity);
-  const localItems = items.filter((item) => item.category === 'local');
-  const dealsItems = items.filter((item) => item.category === 'deals');
 
   const head = [
     '🧠 <b>AI &amp; Crypto Digest</b>',
-    `${fmtDate(new Date(now))} · новости ${CONFIG.windowHours} ч · активности ${CONFIG.activityWindowHours} ч · локальные ${CONFIG.localWindowHours / 24} дн · скидки ${CONFIG.dealsWindowHours / 24} дн`,
-    `Новостей: ${items.length} · ИИ: ${aiItems.length} · Гик: ${geekItems.length} · Крипта: ${activityItems.length + cryptoItems.length} · Локальные: ${localItems.length} · Скидки: ${dealsItems.length}`,
+    `${fmtDate(new Date(now))} · новости ${CONFIG.windowHours} ч · активности ${CONFIG.activityWindowHours} ч`,
+    `Новостей: ${items.length} · ИИ: ${aiItems.length} · Гик: ${geekItems.length} · Крипта: ${activityItems.length + cryptoItems.length}`,
   ].join('\n');
 
   const sections = [];
@@ -770,18 +705,6 @@ function formatDigest(items, now) {
   if (cryptoItems.length) {
     sections.push(
       '🪙 <b>Крипта и Web3</b>\n\n' + cryptoItems.map((item, i) => formatItem(item, i, now)).join('\n\n')
-    );
-  }
-  if (localItems.length) {
-    sections.push(
-      '📍 <b>Локальные новости (Лениногорск и Татнефть)</b>\n\n' +
-        localItems.map((item, i) => formatItem(item, i, now)).join('\n\n')
-    );
-  }
-  if (dealsItems.length) {
-    sections.push(
-      '🛒 <b>Выгодные акции и скидки (Пятёрочка, Магнит, К&Б, Бристоль)</b>\n\n' +
-        dealsItems.map((item, i) => formatItem(item, i, now)).join('\n\n')
     );
   }
 
@@ -970,20 +893,16 @@ async function main() {
   });
 
   const countCat = (cat) => balanced.filter((item) => item.category === cat).length;
-  log(`  кандидаты: ИИ ${countCat('ai')} · крипта ${countCat('crypto')} · гик ${countCat('geek')} · локальные ${countCat('local')} · скидки ${countCat('deals')}`);
+  log(`  кандидаты: ИИ ${countCat('ai')} · крипта ${countCat('crypto')} · гик ${countCat('geek')}`);
 
-  // Квоты: ИИ 20%, крипта 25%, гик 15%, локальные 20%, скидки 20%.
-  const aiQuota = Math.max(1, Math.round(limit * 0.2));
-  const cryptoQuota = Math.max(1, Math.round(limit * 0.25));
-  const geekQuota = Math.max(1, Math.round(limit * 0.15));
-  const localQuota = Math.max(1, Math.round(limit * 0.2));
-  const dealsQuota = Math.max(1, limit - aiQuota - cryptoQuota - geekQuota - localQuota);
+  // Квоты: ИИ 30%, крипта 45%, гик 25% — скидок и локальных больше нет.
+  const aiQuota = Math.max(1, Math.round(limit * 0.3));
+  const cryptoQuota = Math.max(1, Math.round(limit * 0.45));
+  const geekQuota = Math.max(1, limit - aiQuota - cryptoQuota);
   const finalItems = selectBalanced(balanced, limit, {
     ai: aiQuota,
     crypto: cryptoQuota,
     geek: geekQuota,
-    local: localQuota,
-    deals: dealsQuota,
   });
 
   // Помечаем крипто-активности (аирдропы/тестнеты/GameFi) для отдельной секции.
